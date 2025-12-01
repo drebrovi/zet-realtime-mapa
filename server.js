@@ -296,9 +296,18 @@ app.get("/api/vehicles", async (req, res) => {
 // --- HELPER: čitanje stop_times.txt ručno (linija po linija) --- //
 
 function normalizeHeaderName(name) {
-  // makni BOM ako postoji i whitespace oko imena stupca
-  return name.replace(/^\uFEFF/, "").trim();
+  // makni BOM i whitespace
+  return (name || "").replace(/^\uFEFF/, "").trim();
 }
+
+function normalizeField(value) {
+  // makni BOM, navodnike oko vrijednosti i whitespace
+  return (value || "")
+    .replace(/^\uFEFF/, "")
+    .replace(/^"|"$/g, "")
+    .trim();
+}
+
 
 
 function readTripStopTimes(tripId) {
@@ -324,26 +333,33 @@ function readTripStopTimes(tripId) {
         line = line.trim();
         if (!line) continue;
 
-		if (!headerParsed) {
-		  const cols = line.split(",");
-		  cols.forEach((name, idx) => {
-			colIndex[normalizeHeaderName(name)] = idx;
-		  });
-		  headerParsed = true;
-		  continue;
-		}
+	if (!headerParsed) {
+	  const cols = line.split(",");
+	  cols.forEach((name, idx) => {
+		colIndex[normalizeHeaderName(name)] = idx;
+	  });
+	  headerParsed = true;
+
+	  if (colIndex["trip_id"] == null) {
+		console.error("trip_id column not found in stop_times header", colIndex);
+	  }
+	  continue;
+	}
 
 
-        const cols = line.split(",");
-        const id = cols[colIndex["trip_id"]];
-        if (id !== tripId) continue;
+	const cols = line.split(",");
+	const id = normalizeField(cols[colIndex["trip_id"]]);
+	if (id !== String(tripId).trim()) continue;
 
-        const stopId = cols[colIndex["stop_id"]];
-        const seq = Number(cols[colIndex["stop_sequence"]]);
-        const arrival =
-          cols[colIndex["arrival_time"]] || cols[colIndex["departure_time"]];
-        const depart =
-          cols[colIndex["departure_time"]] || cols[colIndex["arrival_time"]];
+	const stopId = normalizeField(cols[colIndex["stop_id"]]);
+	const seq = Number(normalizeField(cols[colIndex["stop_sequence"]]));
+	const arrival =
+	  normalizeField(cols[colIndex["arrival_time"]]) ||
+	  normalizeField(cols[colIndex["departure_time"]]);
+	const depart =
+	  normalizeField(cols[colIndex["departure_time"]]) ||
+	  normalizeField(cols[colIndex["arrival_time"]]);
+
 
         results.push({ stopId, stopSequence: seq, arrival, departure: depart });
       }
@@ -405,25 +421,32 @@ function readDeparturesForStop(stopId, nowSec, yyyymmdd, weekdayIndex) {
 			colIndex[normalizeHeaderName(name)] = idx;
 		  });
 		  headerParsed = true;
+
+		  if (colIndex["trip_id"] == null || colIndex["stop_id"] == null) {
+			console.error(
+			  "Columns not found in stop_times header",
+			  JSON.stringify(colIndex)
+			);
+		  }
 		  continue;
 		}
 
+		const cols = line.split(",");
+		const sId = normalizeField(cols[colIndex["stop_id"]]);
+		if (sId !== String(stopId).trim()) continue;
 
-        const cols = line.split(",");
-        const sId = cols[colIndex["stop_id"]];
-        if (sId !== stopId) continue;
+		const tripId = normalizeField(cols[colIndex["trip_id"]]);
+		const info = tripInfo.get(tripId);
+		if (!info || !info.serviceId) continue;
 
-        const tripId = cols[colIndex["trip_id"]];
-        const info = tripInfo.get(tripId);
-        if (!info || !info.serviceId) continue;
+		if (!isServiceActiveOnDate(info.serviceId, yyyymmdd, weekdayIndex)) continue;
 
-        if (!isServiceActiveOnDate(info.serviceId, yyyymmdd, weekdayIndex))
-          continue;
+		const arrival =
+		  normalizeField(cols[colIndex["arrival_time"]]) ||
+		  normalizeField(cols[colIndex["departure_time"]]);
+		const arrivalSec = timeToSeconds(arrival);
+		if (arrivalSec == null || arrivalSec < nowSec) continue;
 
-        const arrival =
-          cols[colIndex["arrival_time"]] || cols[colIndex["departure_time"]];
-        const arrivalSec = timeToSeconds(arrival);
-        if (arrivalSec == null || arrivalSec < nowSec) continue;
 
         departures.push({
           routeId: info.routeId,
