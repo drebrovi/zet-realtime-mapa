@@ -295,6 +295,12 @@ app.get("/api/vehicles", async (req, res) => {
 //
 // --- HELPER: čitanje stop_times.txt ručno (linija po linija) --- //
 
+function normalizeHeaderName(name) {
+  // makni BOM ako postoji i whitespace oko imena stupca
+  return name.replace(/^\uFEFF/, "").trim();
+}
+
+
 function readTripStopTimes(tripId) {
   return new Promise((resolve, reject) => {
     if (!fs.existsSync(STOP_TIMES_PATH)) {
@@ -318,14 +324,15 @@ function readTripStopTimes(tripId) {
         line = line.trim();
         if (!line) continue;
 
-        if (!headerParsed) {
-          const cols = line.split(",");
-          cols.forEach((name, idx) => {
-            colIndex[name.trim()] = idx;
-          });
-          headerParsed = true;
-          continue;
-        }
+		if (!headerParsed) {
+		  const cols = line.split(",");
+		  cols.forEach((name, idx) => {
+			colIndex[normalizeHeaderName(name)] = idx;
+		  });
+		  headerParsed = true;
+		  continue;
+		}
+
 
         const cols = line.split(",");
         const id = cols[colIndex["trip_id"]];
@@ -392,14 +399,15 @@ function readDeparturesForStop(stopId, nowSec, yyyymmdd, weekdayIndex) {
         line = line.trim();
         if (!line) continue;
 
-        if (!headerParsed) {
-          const cols = line.split(",");
-          cols.forEach((name, idx) => {
-            colIndex[name.trim()] = idx;
-          });
-          headerParsed = true;
-          continue;
-        }
+		if (!headerParsed) {
+		  const cols = line.split(",");
+		  cols.forEach((name, idx) => {
+			colIndex[normalizeHeaderName(name)] = idx;
+		  });
+		  headerParsed = true;
+		  continue;
+		}
+
 
         const cols = line.split(",");
         const sId = cols[colIndex["stop_id"]];
