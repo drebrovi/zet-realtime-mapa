@@ -2,6 +2,9 @@
 <html lang="hr">
   <head>
     <meta charset="UTF-8" />
+	<meta
+  name="viewport"
+  content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"/>
     <title>ZET real-time karta</title>
 
     <link
@@ -24,17 +27,18 @@
         height: 100vh;
       }
 
-      .filter-panel {
-        position: absolute;
-        top: 10px;
-        right: 10px;
-        z-index: 1000;
-        background: rgba(255, 255, 255, 0.9);
-        padding: 8px 12px;
-        border-radius: 8px;
-        font-size: 14px;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-      }
+	.filter-panel {
+	  position: absolute;
+	  top: 10px;
+	  right: 10px;
+	  z-index: 1000;
+	  background: rgba(255, 255, 255, 0.9);
+	  padding: 8px 12px;
+	  border-radius: 8px;
+	  font-size: 14px;
+	  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+	  max-width: 260px;
+	}
 
       .filter-panel label {
         display: block;
@@ -182,6 +186,41 @@
       .tram-color .triangle-down {
         border-top-color: #28a745;
       }
+	  
+		@media (max-width: 768px) {
+	  #map {
+		height: 100vh; /* već je, ali da budemo sigurni */
+	  }
+
+	  .filter-panel {
+		top: 8px;
+		left: 50%;
+		right: auto;
+		transform: translateX(-50%);
+		width: calc(100% - 16px);
+		max-width: 420px;
+		font-size: 13px;
+		padding: 6px 8px;
+	  }
+
+	  .filter-panel label {
+		display: inline-flex;
+		align-items: center;
+		margin-right: 8px;
+		margin-bottom: 4px;
+	  }
+
+	  .filter-panel button {
+		font-size: 12px;
+		padding: 4px 6px;
+	  }
+
+	  .lines-panel {
+		max-height: 140px;
+	  }
+	}
+
+	
     </style>
   </head>
   <body>
