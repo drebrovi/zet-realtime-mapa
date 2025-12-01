@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const http = require("http");
 const { parse: parseSync } = require("csv-parse/sync");
-const { parse } = require("csv-parse");
+//const { parse } = require("csv-parse");
 const GtfsRealtimeBindings = require("gtfs-realtime-bindings");
 
 const app = express();
@@ -293,57 +293,79 @@ app.get("/api/vehicles", async (req, res) => {
 });
 
 //
-// --- HELPER: čitanje stop_times streamom --- //
+// --- HELPER: čitanje stop_times.txt ručno (linija po linija) --- //
 
 function readTripStopTimes(tripId) {
   return new Promise((resolve, reject) => {
-    const results = [];
-
     if (!fs.existsSync(STOP_TIMES_PATH)) {
       return resolve(null);
     }
 
-    fs.createReadStream(STOP_TIMES_PATH)
-      .pipe(
-        parse({
-          columns: true,
-          skip_empty_lines: true,
-        })
-      )
-      .on("data", (row) => {
-        if (row.trip_id === tripId) {
-          const arrival = row.arrival_time || row.departure_time;
-          const depart = row.departure_time || row.arrival_time;
-          results.push({
-            stopId: row.stop_id,
-            stopSequence: Number(row.stop_sequence),
-            arrival,
-            departure: depart,
+    const stream = fs.createReadStream(STOP_TIMES_PATH, { encoding: "utf8" });
+
+    let buffer = "";
+    let headerParsed = false;
+    let colIndex = {};
+
+    const results = [];
+
+    stream.on("data", (chunk) => {
+      buffer += chunk;
+      let lines = buffer.split("\n");
+      buffer = lines.pop(); // zadnja (možda nepotpuna) linija
+
+      for (let line of lines) {
+        line = line.trim();
+        if (!line) continue;
+
+        if (!headerParsed) {
+          const cols = line.split(",");
+          cols.forEach((name, idx) => {
+            colIndex[name.trim()] = idx;
           });
-        }
-      })
-      .on("end", () => {
-        if (!results.length) return resolve(null);
-        results.sort((a, b) => a.stopSequence - b.stopSequence);
-
-        const stops = results.map((s) => ({
-          stopId: s.stopId,
-          stopName: (stopsById.get(s.stopId) || {}).name || s.stopId,
-          arrival: s.arrival,
-          departure: s.departure,
-        }));
-
-        const pathCoords = [];
-        for (const s of results) {
-          const st = stopsById.get(s.stopId);
-          if (st && st.lat && st.lon) {
-            pathCoords.push([st.lat, st.lon]);
-          }
+          headerParsed = true;
+          continue;
         }
 
-        resolve({ stops, path: pathCoords });
-      })
-      .on("error", (err) => reject(err));
+        const cols = line.split(",");
+        const id = cols[colIndex["trip_id"]];
+        if (id !== tripId) continue;
+
+        const stopId = cols[colIndex["stop_id"]];
+        const seq = Number(cols[colIndex["stop_sequence"]]);
+        const arrival =
+          cols[colIndex["arrival_time"]] || cols[colIndex["departure_time"]];
+        const depart =
+          cols[colIndex["departure_time"]] || cols[colIndex["arrival_time"]];
+
+        results.push({ stopId, stopSequence: seq, arrival, departure: depart });
+      }
+    });
+
+    stream.on("end", () => {
+      if (!results.length) return resolve(null);
+
+      results.sort((a, b) => a.stopSequence - b.stopSequence);
+
+      const stops = results.map((s) => ({
+        stopId: s.stopId,
+        stopName: (stopsById.get(s.stopId) || {}).name || s.stopId,
+        arrival: s.arrival,
+        departure: s.departure,
+      }));
+
+      const pathCoords = [];
+      for (const s of results) {
+        const st = stopsById.get(s.stopId);
+        if (st && st.lat && st.lon) {
+          pathCoords.push([st.lat, st.lon]);
+        }
+      }
+
+      resolve({ stops, path: pathCoords });
+    });
+
+    stream.on("error", (err) => reject(err));
   });
 }
 
@@ -353,28 +375,47 @@ function readDeparturesForStop(stopId, nowSec, yyyymmdd, weekdayIndex) {
       return resolve([]);
     }
 
+    const stream = fs.createReadStream(STOP_TIMES_PATH, { encoding: "utf8" });
+
+    let buffer = "";
+    let headerParsed = false;
+    let colIndex = {};
+
     const departures = [];
 
-    fs.createReadStream(STOP_TIMES_PATH)
-      .pipe(
-        parse({
-          columns: true,
-          skip_empty_lines: true,
-        })
-      )
-      .on("data", (row) => {
-        if (row.stop_id !== stopId) return;
+    stream.on("data", (chunk) => {
+      buffer += chunk;
+      let lines = buffer.split("\n");
+      buffer = lines.pop();
 
-        const tripId = row.trip_id;
+      for (let line of lines) {
+        line = line.trim();
+        if (!line) continue;
+
+        if (!headerParsed) {
+          const cols = line.split(",");
+          cols.forEach((name, idx) => {
+            colIndex[name.trim()] = idx;
+          });
+          headerParsed = true;
+          continue;
+        }
+
+        const cols = line.split(",");
+        const sId = cols[colIndex["stop_id"]];
+        if (sId !== stopId) continue;
+
+        const tripId = cols[colIndex["trip_id"]];
         const info = tripInfo.get(tripId);
-        if (!info || !info.serviceId) return;
+        if (!info || !info.serviceId) continue;
 
         if (!isServiceActiveOnDate(info.serviceId, yyyymmdd, weekdayIndex))
-          return;
+          continue;
 
-        const arrival = row.arrival_time || row.departure_time;
+        const arrival =
+          cols[colIndex["arrival_time"]] || cols[colIndex["departure_time"]];
         const arrivalSec = timeToSeconds(arrival);
-        if (arrivalSec == null || arrivalSec < nowSec) return;
+        if (arrivalSec == null || arrivalSec < nowSec) continue;
 
         departures.push({
           routeId: info.routeId,
@@ -382,14 +423,18 @@ function readDeparturesForStop(stopId, nowSec, yyyymmdd, weekdayIndex) {
           headsign: info.headsign || "",
           arrivalSec,
         });
-      })
-      .on("end", () => {
-        departures.sort((a, b) => a.arrivalSec - b.arrivalSec);
-        resolve(departures);
-      })
-      .on("error", (err) => reject(err));
+      }
+    });
+
+    stream.on("end", () => {
+      departures.sort((a, b) => a.arrivalSec - b.arrivalSec);
+      resolve(departures);
+    });
+
+    stream.on("error", (err) => reject(err));
   });
 }
+
 
 // --- API: vozni red za trip + trasa (path) --- //
 app.get("/api/timetable/:tripId", async (req, res) => {
