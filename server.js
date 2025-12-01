@@ -3,8 +3,8 @@ const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
 const http = require("http");
-const AdmZip = require("adm-zip");
-const { parse } = require("csv-parse/sync");
+const { parse: parseSync } = require("csv-parse/sync");
+const { parse } = require("csv-parse");
 const GtfsRealtimeBindings = require("gtfs-realtime-bindings");
 
 const app = express();
@@ -20,16 +20,15 @@ const io = new Server(server, {
 // ZET GTFS-RT endpoint
 const ZET_RT_URL = "https://www.zet.hr/gtfs-rt-protobuf";
 
-// GTFS static ZIP
-const GTFS_ZIP_PATH = path.join(__dirname, "data", "zet-gtfs.zip");
+// GTFS static TXT direktorij (unzipani fileovi)
+const GTFS_TXT_DIR = path.join(__dirname, "data");
+const STOP_TIMES_PATH = path.join(GTFS_TXT_DIR, "stop_times.txt");
 
-// --- GTFS static strukture --- //
-let tripStopTimes = new Map();   // tripId -> [ { stopId, stopSequence, arrival, departure } ]
-let stopsById = new Map();       // stopId -> { id, name, lat, lon }
-let stopDepartures = new Map();  // stopId -> [ { routeId, tripId, serviceId, headsign, arrivalSec } ]
-
-let calendarByService = new Map();      // serviceId -> { days:{mon..sun}, startDate, endDate }
-let calendarDatesByService = new Map(); // serviceId -> [ { dateInt, exceptionType } ] 1=add,2=remove
+// --- GTFS static strukture u memoriji (manje, bez stop_times) --- //
+let stopsById = new Map();            // stopId -> { id, name, lat, lon }
+let tripInfo = new Map();             // tripId -> { routeId, serviceId, headsign }
+let calendarByService = new Map();    // serviceId -> { days:{mon..sun}, startDate, endDate }
+let calendarDatesByService = new Map(); // serviceId -> [ { dateInt, exceptionType } ]
 
 // --- Pomocne za vrijeme --- //
 function timeToSeconds(str) {
@@ -57,40 +56,38 @@ function getVehicleType(routeId) {
   return "bus";
 }
 
-// --- Učitaj GTFS static podatke --- //
+// --- Učitaj GTFS static podatke (bez stop_times) --- //
 function loadGtfsStatic() {
   try {
-    if (!fs.existsSync(GTFS_ZIP_PATH)) {
-      console.warn("GTFS ZIP nije pronađen na:", GTFS_ZIP_PATH);
-      return;
-    }
+    const readTxt = (name) =>
+      fs.readFileSync(path.join(GTFS_TXT_DIR, name), "utf8");
 
-    const zip = new AdmZip(GTFS_ZIP_PATH);
-    const getEntryText = (name) => {
-      const entry = zip.getEntry(name);
-      if (!entry) return null;
-      return entry.getData().toString("utf8");
-    };
-
-    const stopsTxt = getEntryText("stops.txt");
-    const stopTimesTxt = getEntryText("stop_times.txt");
-    const tripsTxt = getEntryText("trips.txt");
-    const calendarTxt = getEntryText("calendar.txt");
-    const calendarDatesTxt = getEntryText("calendar_dates.txt");
-
-    if (!stopsTxt || !stopTimesTxt || !tripsTxt || !calendarTxt) {
+    if (
+      !fs.existsSync(path.join(GTFS_TXT_DIR, "stops.txt")) ||
+      !fs.existsSync(path.join(GTFS_TXT_DIR, "trips.txt")) ||
+      !fs.existsSync(path.join(GTFS_TXT_DIR, "calendar.txt"))
+    ) {
       console.warn(
-        "Nedostaje stops.txt ili stop_times.txt ili trips.txt ili calendar.txt u ZIP-u"
+        "Nedostaju stops.txt/trips.txt/calendar.txt u data/ direktoriju – otpakiraj GTFS ZIP."
       );
       return;
     }
 
-    // trips.txt -> tripId -> { routeId, serviceId, headsign }
-    const tripsRecords = parse(tripsTxt, {
+    const stopsTxt = readTxt("stops.txt");
+    const tripsTxt = readTxt("trips.txt");
+    const calendarTxt = readTxt("calendar.txt");
+    const calendarDatesTxtPath = path.join(GTFS_TXT_DIR, "calendar_dates.txt");
+    const hasCalendarDates = fs.existsSync(calendarDatesTxtPath);
+    const calendarDatesTxt = hasCalendarDates
+      ? readTxt("calendar_dates.txt")
+      : null;
+
+    // trips.txt -> tripInfo
+    const tripsRecords = parseSync(tripsTxt, {
       columns: true,
       skip_empty_lines: true,
     });
-    const tripInfo = new Map(); // tripId -> { routeId, serviceId, headsign }
+    tripInfo = new Map();
     for (const r of tripsRecords) {
       tripInfo.set(r.trip_id, {
         routeId: r.route_id,
@@ -99,8 +96,8 @@ function loadGtfsStatic() {
       });
     }
 
-    // calendar.txt -> serviceId -> osnovni kalendar
-    const calRecords = parse(calendarTxt, {
+    // calendar.txt -> osnovni kalendar
+    const calRecords = parseSync(calendarTxt, {
       columns: true,
       skip_empty_lines: true,
     });
@@ -127,7 +124,7 @@ function loadGtfsStatic() {
     // calendar_dates.txt -> exceptioni
     calendarDatesByService = new Map();
     if (calendarDatesTxt) {
-      const cdRecords = parse(calendarDatesTxt, {
+      const cdRecords = parseSync(calendarDatesTxt, {
         columns: true,
         skip_empty_lines: true,
       });
@@ -145,8 +142,8 @@ function loadGtfsStatic() {
       }
     }
 
-    // stops.txt -> stopId -> (name, lat, lon)
-    const stopsRecords = parse(stopsTxt, {
+    // stops.txt -> stopsById
+    const stopsRecords = parseSync(stopsTxt, {
       columns: true,
       skip_empty_lines: true,
     });
@@ -160,60 +157,8 @@ function loadGtfsStatic() {
       });
     }
 
-    // stop_times.txt -> tripStopTimes + stopDepartures
-    const stRecords = parse(stopTimesTxt, {
-      columns: true,
-      skip_empty_lines: true,
-    });
-
-    tripStopTimes = new Map();
-    stopDepartures = new Map();
-
-    for (const r of stRecords) {
-      const tripId = r.trip_id;
-      const stopId = r.stop_id;
-      const seq = Number(r.stop_sequence);
-      const arrival = r.arrival_time || r.departure_time;
-      const depart = r.departure_time || r.arrival_time;
-      const arrivalSec = timeToSeconds(arrival);
-
-      const info = tripInfo.get(tripId) || {};
-      const routeId = info.routeId || null;
-      const serviceId = info.serviceId || null;
-      const headsign = info.headsign || "";
-
-      // za vozni red po tripu
-      if (!tripStopTimes.has(tripId)) tripStopTimes.set(tripId, []);
-      tripStopTimes.get(tripId).push({
-        stopId,
-        stopSequence: seq,
-        arrival,
-        departure: depart,
-      });
-
-      // za nadolazeće polaske po stanici (pohranjujemo i serviceId & headsign!)
-      if (arrivalSec != null && serviceId) {
-        if (!stopDepartures.has(stopId)) stopDepartures.set(stopId, []);
-        stopDepartures.get(stopId).push({
-          routeId,
-          tripId,
-          serviceId,
-          headsign,
-          arrivalSec,
-        });
-      }
-    }
-
-    // sortiraj po redoslijedu
-    for (const arr of tripStopTimes.values()) {
-      arr.sort((a, b) => a.stopSequence - b.stopSequence);
-    }
-    for (const arr of stopDepartures.values()) {
-      arr.sort((a, b) => a.arrivalSec - b.arrivalSec);
-    }
-
     console.log(
-      `GTFS static učitan: ${stopsById.size} stanica, ${tripStopTimes.size} tripova, ${calendarByService.size} servisa.`
+      `GTFS static učitan: ${stopsById.size} stanica, ${tripInfo.size} tripova, ${calendarByService.size} servisa.`
     );
   } catch (err) {
     console.error("Greška pri učitavanju GTFS static podataka:", err);
@@ -250,8 +195,8 @@ function isServiceActiveOnDate(serviceId, yyyymmdd, weekdayIndex) {
   const exList = calendarDatesByService.get(serviceId) || [];
   for (const ex of exList) {
     if (ex.dateInt === yyyymmdd) {
-      if (ex.exceptionType === 1) active = true;   // dodatni dan
-      if (ex.exceptionType === 2) active = false;  // ukinut dan
+      if (ex.exceptionType === 1) active = true; // dodatni dan
+      if (ex.exceptionType === 2) active = false; // ukinut dan
     }
   }
 
@@ -347,44 +292,130 @@ app.get("/api/vehicles", async (req, res) => {
   }
 });
 
+//
+// --- HELPER: čitanje stop_times streamom --- //
+
+function readTripStopTimes(tripId) {
+  return new Promise((resolve, reject) => {
+    const results = [];
+
+    if (!fs.existsSync(STOP_TIMES_PATH)) {
+      return resolve(null);
+    }
+
+    fs.createReadStream(STOP_TIMES_PATH)
+      .pipe(
+        parse({
+          columns: true,
+          skip_empty_lines: true,
+        })
+      )
+      .on("data", (row) => {
+        if (row.trip_id === tripId) {
+          const arrival = row.arrival_time || row.departure_time;
+          const depart = row.departure_time || row.arrival_time;
+          results.push({
+            stopId: row.stop_id,
+            stopSequence: Number(row.stop_sequence),
+            arrival,
+            departure: depart,
+          });
+        }
+      })
+      .on("end", () => {
+        if (!results.length) return resolve(null);
+        results.sort((a, b) => a.stopSequence - b.stopSequence);
+
+        const stops = results.map((s) => ({
+          stopId: s.stopId,
+          stopName: (stopsById.get(s.stopId) || {}).name || s.stopId,
+          arrival: s.arrival,
+          departure: s.departure,
+        }));
+
+        const pathCoords = [];
+        for (const s of results) {
+          const st = stopsById.get(s.stopId);
+          if (st && st.lat && st.lon) {
+            pathCoords.push([st.lat, st.lon]);
+          }
+        }
+
+        resolve({ stops, path: pathCoords });
+      })
+      .on("error", (err) => reject(err));
+  });
+}
+
+function readDeparturesForStop(stopId, nowSec, yyyymmdd, weekdayIndex) {
+  return new Promise((resolve, reject) => {
+    if (!fs.existsSync(STOP_TIMES_PATH)) {
+      return resolve([]);
+    }
+
+    const departures = [];
+
+    fs.createReadStream(STOP_TIMES_PATH)
+      .pipe(
+        parse({
+          columns: true,
+          skip_empty_lines: true,
+        })
+      )
+      .on("data", (row) => {
+        if (row.stop_id !== stopId) return;
+
+        const tripId = row.trip_id;
+        const info = tripInfo.get(tripId);
+        if (!info || !info.serviceId) return;
+
+        if (!isServiceActiveOnDate(info.serviceId, yyyymmdd, weekdayIndex))
+          return;
+
+        const arrival = row.arrival_time || row.departure_time;
+        const arrivalSec = timeToSeconds(arrival);
+        if (arrivalSec == null || arrivalSec < nowSec) return;
+
+        departures.push({
+          routeId: info.routeId,
+          tripId,
+          headsign: info.headsign || "",
+          arrivalSec,
+        });
+      })
+      .on("end", () => {
+        departures.sort((a, b) => a.arrivalSec - b.arrivalSec);
+        resolve(departures);
+      })
+      .on("error", (err) => reject(err));
+  });
+}
+
 // --- API: vozni red za trip + trasa (path) --- //
-app.get("/api/timetable/:tripId", (req, res) => {
+app.get("/api/timetable/:tripId", async (req, res) => {
   const tripId = req.params.tripId;
 
   if (!tripId) {
     return res.status(400).json({ error: "Nedostaje tripId." });
   }
 
-  if (!tripStopTimes || tripStopTimes.size === 0) {
-    return res
-      .status(503)
-      .json({ error: "GTFS static podaci nisu učitani na serveru." });
-  }
-
-  const list = tripStopTimes.get(tripId);
-  if (!list) {
-    return res
-      .status(404)
-      .json({ error: "Nije pronađen vozni red za zadani tripId." });
-  }
-
-  const stops = list.map((s) => ({
-    stopId: s.stopId,
-    stopName: (stopsById.get(s.stopId) || {}).name || s.stopId,
-    arrival: s.arrival,
-    departure: s.departure,
-  }));
-
-  // trasa: niz [lat, lon] po redoslijedu stanica
-  const pathCoords = [];
-  for (const s of list) {
-    const st = stopsById.get(s.stopId);
-    if (st && st.lat && st.lon) {
-      pathCoords.push([st.lat, st.lon]);
+  try {
+    const data = await readTripStopTimes(tripId);
+    if (!data) {
+      return res
+        .status(404)
+        .json({ error: "Nije pronađen vozni red za zadani tripId." });
     }
-  }
 
-  res.json({ tripId, stops, path: pathCoords });
+    res.json({
+      tripId,
+      stops: data.stops,
+      path: data.path,
+    });
+  } catch (err) {
+    console.error("Greška u /api/timetable:", err);
+    res.status(500).json({ error: "Greška pri dohvaćanju voznog reda." });
+  }
 });
 
 // --- API: lista stanica --- //
@@ -394,14 +425,12 @@ app.get("/api/stops", (req, res) => {
 });
 
 // --- API: nadolazeći polasci za stanicu (full GTFS kalendar + headsign) --- //
-app.get("/api/stop-departures/:stopId", (req, res) => {
+app.get("/api/stop-departures/:stopId", async (req, res) => {
   const stopId = req.params.stopId;
 
   if (!stopsById.has(stopId)) {
     return res.status(404).json({ error: "Nepoznata stanica." });
   }
-
-  const list = stopDepartures.get(stopId) || [];
 
   const now = new Date();
   const pad = (n) => String(n).padStart(2, "0");
@@ -417,31 +446,36 @@ app.get("/api/stop-departures/:stopId", (req, res) => {
   const nowSec =
     now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
 
-  const filtered = list
-    .filter((x) => {
-      if (!x.serviceId) return false;
-      if (!isServiceActiveOnDate(x.serviceId, yyyymmdd, weekdayIndex))
-        return false;
-      return x.arrivalSec >= nowSec;
-    })
-    .slice(0, 5);
+  try {
+    const rawDeps = await readDeparturesForStop(
+      stopId,
+      nowSec,
+      yyyymmdd,
+      weekdayIndex
+    );
 
-  const departures = filtered.map((d) => {
-    const etaMin = Math.round((d.arrivalSec - nowSec) / 60);
-    return {
-      routeId: d.routeId,
-      tripId: d.tripId,
-      headsign: d.headsign || "",
-      time: secondsToTime(d.arrivalSec),
-      etaMinutes: etaMin,
-    };
-  });
+    const filtered = rawDeps.slice(0, 5);
 
-  res.json({
-    stopId,
-    stopName: stopsById.get(stopId).name,
-    departures,
-  });
+    const departures = filtered.map((d) => {
+      const etaMin = Math.round((d.arrivalSec - nowSec) / 60);
+      return {
+        routeId: d.routeId,
+        tripId: d.tripId,
+        headsign: d.headsign || "",
+        time: secondsToTime(d.arrivalSec),
+        etaMinutes: etaMin,
+      };
+    });
+
+    res.json({
+      stopId,
+      stopName: stopsById.get(stopId).name,
+      departures,
+    });
+  } catch (err) {
+    console.error("Greška u /api/stop-departures:", err);
+    res.status(500).json({ error: "Greška pri dohvaćanju polazaka." });
+  }
 });
 
 // --- Start servera --- //
