@@ -552,35 +552,31 @@ async function showStopDepartures(marker, group) {
   showLoader("Učitavam polaske...");
 
   try {
-    const promises = group.stopIds.map((stopId) =>
-      fetch(`/api/stop-departures/${encodeURIComponent(stopId)}`).then((r) =>
-        r.ok ? r.json() : null
-      )
+    // VARIJANTA 1: koristi samo prvi stopId iz grupe (primarni peron)
+    const primaryStopId = group.stopIds[0];
+
+    const res = await fetch(
+      `/api/stop-departures/${encodeURIComponent(primaryStopId)}`
     );
 
-    const results = (await Promise.all(promises)).filter(Boolean);
-
-    let allDeps = [];
-    for (const r of results) {
-      const deps = r.departures || [];
-      deps.forEach((d) => {
-        allDeps.push({
-          ...d,
-          stopId: r.stopId,
-          stopName: r.stopName,
-        });
-      });
+    if (!res.ok) {
+      marker.setPopupContent("Greška pri dohvaćanju polazaka.");
+      return;
     }
 
-    if (!allDeps.length) {
+    const r = await res.json();
+    const deps = r.departures || [];
+
+    if (!deps.length) {
       marker.setPopupContent(
         `<strong>${group.name}</strong><br/>Nema nadolazećih polazaka u bliskoj budućnosti.`
       );
       return;
     }
 
-    allDeps.sort((a, b) => a.etaMinutes - b.etaMinutes);
-    const top = allDeps.slice(0, 8);
+    // već su sortirani na backendu, ali za svaki slučaj:
+    deps.sort((a, b) => a.etaMinutes - b.etaMinutes);
+    const top = deps.slice(0, 8);
 
     const rows = top
       .map(
@@ -597,8 +593,11 @@ async function showStopDepartures(marker, group) {
     const html = `
       <div style="font-size:13px; max-height:260px; overflow:auto;">
         <strong>${group.name}</strong>
+        <div style="font-size:11px; color:#666; margin-top:2px;">
+          (prikaz s jednog perona ove stanice)
+        </div>
         <hr/>
-        <strong>Sljedeći polasci (svi peroni):</strong>
+        <strong>Sljedeći polasci:</strong>
         <table style="border-collapse:collapse; margin-top:4px;">
           <thead>
             <tr>
@@ -614,6 +613,16 @@ async function showStopDepartures(marker, group) {
         </table>
       </div>
     `;
+
+    marker.setPopupContent(html);
+  } catch (err) {
+    console.error(err);
+    marker.setPopupContent("Greška pri dohvaćanju polazaka.");
+  } finally {
+    hideLoader();
+  }
+}
+
 
     marker.setPopupContent(html);
   } catch (err) {

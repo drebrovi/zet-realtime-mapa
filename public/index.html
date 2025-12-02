@@ -272,31 +272,36 @@
       }
 
       /* Mobile prilagodba */
-      @media (max-width: 768px) {
-        .filter-panel {
-          top: 8px;
-          right: 8px;
-          left: auto;
-          transform: none;
-          width: auto;
-          max-width: 85vw;
-          font-size: 12px;
-          padding: 6px 8px;
-        }
+		@media (max-width: 768px) {
+		  .filter-panel {
+			top: 8px;
+			right: 8px;
+			left: auto;
+			transform: none;
+			width: auto;
+			max-width: 80vw;
+			font-size: 12px;
+			padding: 6px 8px;
 
-        .filter-panel button {
-          font-size: 12px;
-          padding: 4px 6px;
-        }
+			/* NOVO: panel nikad viši od pola ekrana */
+			max-height: 50vh;
+			overflow-y: auto;
+		  }
 
-        .lines-panel {
-          max-height: 120px;
-        }
+		  .filter-panel button {
+			font-size: 12px;
+			padding: 4px 6px;
+		  }
 
-        .status-badge {
-          font-size: 10px;
-        }
-      }
+		  .lines-panel {
+			max-height: 40vh; /* dio od tih 50% ekrana je rezerviran za listu linija */
+		  }
+
+		  .status-badge {
+			font-size: 10px;
+		  }
+		}
+
     </style>
   </head>
   <body>
