@@ -14,6 +14,9 @@ const btnToggleLines = document.getElementById("btn-toggle-lines");
 const linesPanel = document.getElementById("lines-panel");
 const loaderOverlay = document.getElementById("loader-overlay");
 const statusBadge = document.getElementById("status-badge");
+const menuToggle = document.getElementById("menu-toggle");
+const menuContent = document.getElementById("menu-content");
+
 
 // Stanje vozila
 const markers = new Map();
@@ -301,6 +304,17 @@ function renderLinesPanel() {
 btnToggleLines.addEventListener("click", () => {
   linesPanel.classList.toggle("open");
 });
+
+if (menuToggle && menuContent) {
+  // već smo u HTML-u stavili class="menu-content collapsed"
+  // ali za svaki slučaj:
+  menuContent.classList.add("collapsed");
+
+  menuToggle.addEventListener("click", () => {
+    menuContent.classList.toggle("collapsed");
+  });
+}
+
 
 // --- Klik na vozilo: vozni red + trasa --- //
 function attachTimetableHandler(marker, vehicle) {

@@ -41,6 +41,29 @@
         max-width: 260px;
       }
 
+		.menu-toggle-btn {
+		  width: 100%;
+		  padding: 4px 6px;
+		  font-size: 13px;
+		  border-radius: 6px;
+		  border: 1px solid #ccc;
+		  cursor: pointer;
+		  background: #f5f5f5;
+		}
+
+		.menu-toggle-btn:hover {
+		  background: #e9e9e9;
+		}
+
+		.menu-content {
+		  margin-top: 6px;
+		}
+
+		.menu-content.collapsed {
+		  display: none;
+		}
+
+
       .filter-panel label {
         display: inline-flex;
         align-items: center;
@@ -289,16 +312,24 @@
     </style>
   </head>
   <body>
-    <div class="filter-panel">
-      <label><input type="checkbox" id="filter-tram" checked /> Tramvaji</label>
-      <label><input type="checkbox" id="filter-bus" checked /> Autobusi</label>
-      <button id="btn-toggle-lines">Pokaži linije</button>
-      <div id="lines-panel" class="lines-panel"></div>
-      <button id="btn-nearest-stop">Najbliža stanica</button>
-      <div id="status-badge" class="status-badge status-unknown">
-        ⚪ ZET feed: nepoznato
-      </div>
-    </div>
+	<div class="filter-panel">
+	  <button id="menu-toggle" class="menu-toggle-btn">☰ Izbornik</button>
+
+	  <div id="menu-content" class="menu-content collapsed">
+		<label><input type="checkbox" id="filter-tram" checked /> Tramvaji</label>
+		<label><input type="checkbox" id="filter-bus" checked /> Autobusi</label>
+
+		<button id="btn-toggle-lines">Pokaži linije</button>
+		<div id="lines-panel" class="lines-panel"></div>
+
+		<button id="btn-nearest-stop">Najbliža stanica</button>
+
+		<div id="status-badge" class="status-badge status-unknown">
+		  ⚪ ZET feed: nepoznato
+		</div>
+	  </div>
+	</div>
+
 
     <div id="loader-overlay" class="loader-overlay hidden">
       <div class="loader-box">
