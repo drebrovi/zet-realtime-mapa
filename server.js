@@ -508,19 +508,38 @@ app.get("/api/stop-departures/:stopId", async (req, res) => {
     return res.status(404).json({ error: "Nepoznata stanica." });
   }
 
-  const now = new Date();
   const pad = (n) => String(n).padStart(2, "0");
-  const y = now.getFullYear();
-  const m = now.getMonth() + 1;
-  const d = now.getDate();
-  const yyyymmdd = Number(`${y}${pad(m)}${pad(d)}`);
 
-  // weekdayIndex: 0=pon, ..., 6=ned
-  const jsDay = now.getDay(); // 0=ned ... 6=sub
-  const weekdayIndex = (jsDay + 6) % 7;
+  let nowSec;
+  let yyyymmdd;
+  let weekdayIndex;
 
-  const nowSec =
-    now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  const { date, time, dow } = req.query;
+
+  if (date && time && typeof dow !== "undefined") {
+    // Vrijeme stiže s klijenta (lokalno)
+    yyyymmdd = Number(date);
+    weekdayIndex = Number(dow);
+
+    const parts = String(time).split(":").map(Number);
+    const h = parts[0] || 0;
+    const m = parts[1] || 0;
+    const s = parts[2] || 0;
+    nowSec = h * 3600 + m * 60 + s;
+  } else {
+    // Fallback: vrijeme sa servera (ako query nema parametre)
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth() + 1;
+    const d = now.getDate();
+    yyyymmdd = Number(`${y}${pad(m)}${pad(d)}`);
+
+    const jsDay = now.getDay(); // 0=ned ... 6=sub
+    weekdayIndex = (jsDay + 6) % 7;
+
+    nowSec =
+      now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  }
 
   try {
     const rawDeps = await readDeparturesForStop(
@@ -553,6 +572,7 @@ app.get("/api/stop-departures/:stopId", async (req, res) => {
     res.status(500).json({ error: "Greška pri dohvaćanju polazaka." });
   }
 });
+
 
 // --- Start servera --- //
 server.listen(PORT, () => {

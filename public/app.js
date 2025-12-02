@@ -31,7 +31,7 @@ let lastVehicles = [];
 const allLines = new Set();
 const activeLines = new Set();
 
-// Stanice
+// Staniceset
 let stopGroups = [];
 const groupMarkers = new Map();
 
@@ -146,6 +146,28 @@ function setStatus(mode, updatedUnix) {
 
   statusBadge.textContent = label;
 }
+
+function buildTimeQueryParams() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
+  const d = now.getDate();
+  const dateStr = `${y}${pad(m)}${pad(d)}`;
+
+  const hh = pad(now.getHours());
+  const mm = pad(now.getMinutes());
+  const ss = pad(now.getSeconds());
+  const timeStr = `${hh}:${mm}:${ss}`;
+
+  // weekdayIndex: 0=pon, ..., 6=ned
+  const jsDay = now.getDay(); // 0=ned ... 6=sub
+  const weekdayIndex = (jsDay + 6) % 7;
+
+  return `date=${dateStr}&time=${timeStr}&dow=${weekdayIndex}`;
+}
+
 
 // --- Ikona krug + trokut --- //
 function makeIcon(type, line, direction) {
@@ -546,9 +568,12 @@ async function showStopDepartures(marker, group) {
 
   try {
     const primaryStopId = group.stopIds[0];
+	const timeQuery = buildTimeQueryParams();
 
-    const res = await fetch(
-      `/api/stop-departures/${encodeURIComponent(primaryStopId)}`
+	const res = await fetch(
+      `/api/stop-departures/${encodeURIComponent(
+        primaryStopId
+      )}?${timeQuery}`
     );
 
     if (!res.ok) {
