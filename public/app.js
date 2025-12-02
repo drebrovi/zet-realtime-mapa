@@ -12,23 +12,29 @@ const filterBus = document.getElementById("filter-bus");
 const btnNearestStop = document.getElementById("btn-nearest-stop");
 const btnToggleLines = document.getElementById("btn-toggle-lines");
 const linesPanel = document.getElementById("lines-panel");
+const loaderOverlay = document.getElementById("loader-overlay");
+const statusBadge = document.getElementById("status-badge");
 
 // Stanje vozila
-const markers = new Map();        // vehicleId -> Leaflet marker
-const lastPositions = new Map();  // vehicleId -> { lat, lon, dir }
-const animations = new Map();     // vehicleId -> Symbol animacije
-const historyPoints = new Map();  // vehicleId -> [ [lat, lon], ... ]
-const historyDots = new Map();    // vehicleId -> [ L.CircleMarker ]
-let currentRoutePolyline = null;  // trenutno nacrtana trasa
-let lastVehicles = [];            // zadnji real-time snapshot
+const markers = new Map(); // vehicleId -> Leaflet marker
+const lastPositions = new Map(); // vehicleId -> { lat, lon, dir }
+const animations = new Map(); // vehicleId -> Symbol animacije
+const historyPoints = new Map(); // vehicleId -> [ [lat, lon], ... ]
+const historyDots = new Map(); // vehicleId -> [ L.CircleMarker ]
+let currentRoutePolyline = null; // trenutno nacrtana trasa
+let lastVehicles = []; // zadnji real-time snapshot
 
 // Linije (routeId) za filter
-const allLines = new Set();       // sve linije koje smo vidjeli
-const activeLines = new Set();    // eksplicitno odabrane linije (ako je 0 -> nema filtera)
+const allLines = new Set(); // sve linije koje smo vidjeli
+const activeLines = new Set(); // eksplicitno odabrane linije (ako je 0 -> nema filtera)
 
 // Stanje stanica (grupirano)
-let stopGroups = [];              // [{ id, name, lat, lon, stopIds: [] }]
-const groupMarkers = new Map();   // groupId -> L.CircleMarker
+let stopGroups = []; // [{ id, name, lat, lon, stopIds: [] }]
+const groupMarkers = new Map(); // groupId -> L.CircleMarker
+
+// Status feeda
+let lastFeedUpdated = null; // unix timestamp
+let lastStatusMode = "unknown";
 
 // --- Haversine & smjer --- //
 const toRad = (d) => (d * Math.PI) / 180;
@@ -54,12 +60,12 @@ function computeDirection(prevLat, prevLon, lat, lon) {
 
   const avgLatRad = toRad((lat + prevLat) / 2);
   const x = dLon * Math.cos(avgLatRad); // istočno-zapadno
-  const y = dLat;                       // sjever-jug
+  const y = dLat; // sjever-jug
 
   if (Math.abs(x) > Math.abs(y)) {
-    return x > 0 ? "right" : "left";   // istok/desno, zapad/lijevo
+    return x > 0 ? "right" : "left"; // istok/desno, zapad/lijevo
   } else {
-    return y > 0 ? "up" : "down";      // sjever/gore, jug/dolje
+    return y > 0 ? "up" : "down"; // sjever/gore, jug/dolje
   }
 }
 
@@ -80,8 +86,66 @@ function updateLocalDirection(id, lat, lon) {
   return dir;
 }
 
-// --- IKONA KRUG + TROKUT --- //
+// --- Helper: loader overlay --- //
+function showLoader(text) {
+  if (!loaderOverlay) return;
+  loaderOverlay.classList.remove("hidden");
+  const t = loaderOverlay.querySelector(".loader-text");
+  if (t && text) t.textContent = text;
+}
 
+function hideLoader() {
+  if (!loaderOverlay) return;
+  loaderOverlay.classList.add("hidden");
+}
+
+// --- Helper: status panel --- //
+function formatTimeFromUnix(unixSeconds) {
+  const d = new Date(unixSeconds * 1000);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
+}
+
+function setStatus(mode, updatedUnix) {
+  if (!statusBadge) return;
+
+  lastStatusMode = mode;
+  statusBadge.classList.remove(
+    "status-ok",
+    "status-stale",
+    "status-offline",
+    "status-unknown"
+  );
+
+  let label = "";
+  switch (mode) {
+    case "ok":
+      label = "🟢 ZET feed: online";
+      statusBadge.classList.add("status-ok");
+      break;
+    case "stale":
+      label = "🟡 ZET feed: kasni";
+      statusBadge.classList.add("status-stale");
+      break;
+    case "offline":
+      label = "🔴 ZET feed: offline";
+      statusBadge.classList.add("status-offline");
+      break;
+    default:
+      label = "⚪ ZET feed: nepoznato";
+      statusBadge.classList.add("status-unknown");
+  }
+
+  if (updatedUnix) {
+    label += ` (zadnji: ${formatTimeFromUnix(updatedUnix)})`;
+  }
+
+  statusBadge.textContent = label;
+}
+
+// --- IKONA KRUG + TROKUT --- //
 function makeIcon(type, line, direction) {
   const colorClass = type === "bus" ? "bus-color" : "tram-color";
   const text = line ? String(line) : "";
@@ -129,7 +193,6 @@ function makeIcon(type, line, direction) {
 }
 
 // --- SMOOTH ANIMACIJA VOZILA --- //
-
 function animateMarker(id, marker, fromLatLng, toLatLng, duration = 800) {
   if (!fromLatLng) {
     marker.setLatLng(toLatLng);
@@ -159,7 +222,6 @@ function animateMarker(id, marker, fromLatLng, toLatLng, duration = 800) {
 }
 
 // --- TRAIL S FADE-OUT TOČKICAMA --- //
-
 function updateHistory(id, type, lat, lon) {
   let pts = historyPoints.get(id);
   if (!pts) {
@@ -198,11 +260,9 @@ function updateHistory(id, type, lat, lon) {
 }
 
 // --- PANEL ZA LINIJE (UI) --- //
-
 function renderLinesPanel() {
   if (!linesPanel) return;
 
-  // ne diraj selekcije, samo prikaz
   const lines = Array.from(allLines);
   if (!lines.length) {
     linesPanel.innerHTML = "<em>Nema još linija u feedu...</em>";
@@ -226,7 +286,7 @@ function renderLinesPanel() {
     input.type = "checkbox";
     input.id = id;
     input.value = line;
-    input.checked = activeLines.has(line); // ako je u setu -> označeno
+    input.checked = activeLines.has(line);
 
     input.addEventListener("change", () => {
       if (input.checked) {
@@ -234,7 +294,6 @@ function renderLinesPanel() {
       } else {
         activeLines.delete(line);
       }
-      // refilter vozila
       handleVehicles(lastVehicles);
     });
 
@@ -244,13 +303,11 @@ function renderLinesPanel() {
   });
 }
 
-// toggle show/hide lista linija
 btnToggleLines.addEventListener("click", () => {
   linesPanel.classList.toggle("open");
 });
 
 // --- KLIK NA VOZILO = VOZNI RED + TRASA --- //
-
 function attachTimetableHandler(marker, vehicle) {
   marker.off("click");
 
@@ -263,6 +320,7 @@ function attachTimetableHandler(marker, vehicle) {
     }
 
     marker.bindPopup("Učitavam vozni red...").openPopup();
+    showLoader("Učitavam vozni red...");
 
     try {
       const res = await fetch(
@@ -331,12 +389,13 @@ function attachTimetableHandler(marker, vehicle) {
     } catch (err) {
       console.error(err);
       marker.setPopupContent("Greška pri učitavanju voznog reda.");
+    } finally {
+      hideLoader();
     }
   });
 }
 
 // --- OBRADA VOZILA IZ WEBSOCKET FEEDA --- //
-
 function handleVehicles(list) {
   lastVehicles = list || [];
 
@@ -411,7 +470,6 @@ function handleVehicles(list) {
 }
 
 // --- GRUPIRANJE STANICA --- //
-
 function buildStopGroups(stopsRaw) {
   const groups = [];
   const THRESHOLD = 40; // metri
@@ -451,7 +509,6 @@ function buildStopGroups(stopsRaw) {
 }
 
 // --- STANICE: DOHVAT, CRTANJE, POPUP --- //
-
 async function loadStops() {
   try {
     const res = await fetch("/api/stops");
@@ -492,6 +549,7 @@ async function loadStops() {
 
 async function showStopDepartures(marker, group) {
   marker.bindPopup("Učitavam polaske...").openPopup();
+  showLoader("Učitavam polaske...");
 
   try {
     const promises = group.stopIds.map((stopId) =>
@@ -561,11 +619,12 @@ async function showStopDepartures(marker, group) {
   } catch (err) {
     console.error(err);
     marker.setPopupContent("Greška pri dohvaćanju polazaka.");
+  } finally {
+    hideLoader();
   }
 }
 
 // --- NAJBLIŽA STANICA (po grupama) --- //
-
 function findNearestGroup(lat, lon) {
   if (!stopGroups.length) return null;
 
@@ -624,20 +683,42 @@ btnNearestStop.addEventListener("click", () => {
 });
 
 // --- WebSocket za vozila --- //
-
 const socket = io();
 
 socket.on("connect", () => {
   console.log("WebSocket povezan");
+  if (lastFeedUpdated) {
+    const ageMs = Date.now() - lastFeedUpdated * 1000;
+    if (ageMs < 120000) setStatus("ok", lastFeedUpdated);
+    else setStatus("stale", lastFeedUpdated);
+  } else {
+    setStatus("unknown", null);
+  }
+});
+
+socket.on("disconnect", () => {
+  console.log("WebSocket odspojen");
+  setStatus("offline", lastFeedUpdated);
+});
+
+socket.on("connect_error", () => {
+  console.log("WebSocket greška");
+  setStatus("offline", lastFeedUpdated);
 });
 
 socket.on("vehicles", (payload) => {
   const vehicles = (payload && payload.vehicles) || [];
   handleVehicles(vehicles);
-});
 
-socket.on("disconnect", () => {
-  console.log("WebSocket odspojen");
+  const updated = payload && payload.updated;
+  if (typeof updated === "number") {
+    lastFeedUpdated = updated;
+    const ageMs = Date.now() - updated * 1000;
+    if (ageMs < 120000) setStatus("ok", updated);
+    else setStatus("stale", updated);
+  } else {
+    setStatus("unknown", null);
+  }
 });
 
 // inicijalno učitaj stanice

@@ -2,9 +2,10 @@
 <html lang="hr">
   <head>
     <meta charset="UTF-8" />
-	<meta
-  name="viewport"
-  content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"/>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
+    />
     <title>ZET real-time karta</title>
 
     <link
@@ -27,31 +28,33 @@
         height: 100vh;
       }
 
-	.filter-panel {
-	  position: absolute;
-	  top: 10px;
-	  right: 10px;
-	  z-index: 1000;
-	  background: rgba(255, 255, 255, 0.9);
-	  padding: 8px 12px;
-	  border-radius: 8px;
-	  font-size: 14px;
-	  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-	  max-width: 260px;
-	}
+      .filter-panel {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.95);
+        padding: 8px 10px;
+        border-radius: 10px;
+        font-size: 14px;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+        max-width: 260px;
+      }
 
       .filter-panel label {
-        display: block;
+        display: inline-flex;
+        align-items: center;
+        margin-right: 8px;
         margin-bottom: 4px;
         cursor: pointer;
       }
 
       .filter-panel button {
-        margin-top: 6px;
+        margin-top: 4px;
         width: 100%;
         padding: 4px 6px;
         font-size: 13px;
-        border-radius: 4px;
+        border-radius: 6px;
         border: 1px solid #ccc;
         cursor: pointer;
         background: #f5f5f5;
@@ -80,6 +83,41 @@
         display: block;
         margin-bottom: 2px;
         cursor: pointer;
+      }
+
+      /* Status badge */
+      .status-badge {
+        margin-top: 6px;
+        padding: 3px 6px;
+        border-radius: 999px;
+        border: 1px solid #ddd;
+        font-size: 11px;
+        text-align: center;
+        white-space: nowrap;
+      }
+
+      .status-ok {
+        background: #e9f9ef;
+        color: #137333;
+        border-color: #c3e6cd;
+      }
+
+      .status-stale {
+        background: #fff8e5;
+        color: #8a6d3b;
+        border-color: #ffe0a3;
+      }
+
+      .status-offline {
+        background: #fdecea;
+        color: #b3261e;
+        border-color: #f5c2c0;
+      }
+
+      .status-unknown {
+        background: #f5f5f5;
+        color: #555;
+        border-color: #ddd;
       }
 
       /* Glavna divIcon “kutija” */
@@ -186,41 +224,79 @@
       .tram-color .triangle-down {
         border-top-color: #28a745;
       }
-	  
-		@media (max-width: 768px) {
-	  #map {
-		height: 100vh; /* već je, ali da budemo sigurni */
-	  }
 
-	  .filter-panel {
-		top: 8px;
-		left: 50%;
-		right: auto;
-		transform: translateX(-50%);
-		width: calc(100% - 16px);
-		max-width: 420px;
-		font-size: 13px;
-		padding: 6px 8px;
-	  }
+      /* Loader overlay */
+      .loader-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(255, 255, 255, 0.65);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+      }
 
-	  .filter-panel label {
-		display: inline-flex;
-		align-items: center;
-		margin-right: 8px;
-		margin-bottom: 4px;
-	  }
+      .loader-overlay.hidden {
+        display: none;
+      }
 
-	  .filter-panel button {
-		font-size: 12px;
-		padding: 4px 6px;
-	  }
+      .loader-box {
+        background: #ffffff;
+        padding: 12px 16px;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+      }
 
-	  .lines-panel {
-		max-height: 140px;
-	  }
-	}
+      .loader-spinner {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        border: 3px solid #ccc;
+        border-top-color: #007bff;
+        animation: spin 0.8s linear infinite;
+      }
 
-	
+      .loader-text {
+        color: #333;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* Mobile prilagodba */
+      @media (max-width: 768px) {
+        .filter-panel {
+          top: 8px;
+          right: 8px;
+          left: auto;
+          transform: none;
+          width: auto;
+          max-width: 85vw;
+          font-size: 12px;
+          padding: 6px 8px;
+        }
+
+        .filter-panel button {
+          font-size: 12px;
+          padding: 4px 6px;
+        }
+
+        .lines-panel {
+          max-height: 120px;
+        }
+
+        .status-badge {
+          font-size: 10px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -230,6 +306,20 @@
       <button id="btn-toggle-lines">Pokaži linije</button>
       <div id="lines-panel" class="lines-panel"></div>
       <button id="btn-nearest-stop">Najbliža stanica</button>
+      <div
+        id="status-badge"
+        class="status-badge status-unknown"
+      >
+        ⚪ ZET feed: nepoznato
+      </div>
+    </div>
+
+    <!-- Loader overlay -->
+    <div id="loader-overlay" class="loader-overlay hidden">
+      <div class="loader-box">
+        <div class="loader-spinner"></div>
+        <div class="loader-text">Učitavam...</div>
+      </div>
     </div>
 
     <div id="map"></div>
